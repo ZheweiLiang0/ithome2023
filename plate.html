@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>手機車牌辨識</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #666666;
+    --accent: #1f6feb;
+    --ok: #1a7f37;
+    --card: #f4f5f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111315;
+      --fg: #e8e8e8;
+      --muted: #9a9a9a;
+      --accent: #4c8dff;
+      --ok: #3fb950;
+      --card: #1c1f23;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: system-ui, -apple-system, "Noto Sans TC", sans-serif;
+  }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 0 0 8px; }
+  p.hint { color: var(--muted); margin: 0 0 16px; font-size: 0.9rem; }
+  .viewer {
+    position: relative;
+    width: 100%;
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    aspect-ratio: 3 / 4;
+  }
+  video, .viewer img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  /* 對準框：只辨識框內區域 */
+  .guide {
+    position: absolute;
+    left: 10%;
+    width: 80%;
+    top: 50%;
+    aspect-ratio: 2.4 / 1;
+    transform: translateY(-50%);
+    border: 3px solid #ffd400;
+    border-radius: 8px;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+  }
+  .buttons { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
+  button, label.btn {
+    flex: 1 1 140px;
+    padding: 14px;
+    font-size: 1rem;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #fff;
+    text-align: center;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; }
+  label.btn { background: var(--card); color: var(--fg); }
+  input[type=file] { display: none; }
+  .result {
+    background: var(--card);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .plate {
+    font-size: 2.2rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--ok);
+    min-height: 2.6rem;
+  }
+  .meta { color: var(--muted); font-size: 0.85rem; word-break: break-all; }
+  canvas#preview { width: 100%; margin-top: 8px; border-radius: 6px; display: none; }
+  ul#history { padding-left: 20px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>手機車牌辨識</h1>
+  <p class="hint">把車牌對準黃色框，按「辨識」。所有運算都在手機瀏覽器裡完成，影像不會上傳。</p>
+
+  <div class="viewer">
+    <video id="video" playsinline muted autoplay></video>
+    <div class="guide"></div>
+  </div>
+
+  <div class="buttons">
+    <button id="startBtn">開啟相機</button>
+    <button id="scanBtn" disabled>辨識</button>
+    <label class="btn" for="fileInput">改用拍照 / 選照片</label>
+    <input id="fileInput" type="file" accept="image/*" capture="environment">
+  </div>
+
+  <div class="result">
+    <div class="plate" id="plate">—</div>
+    <div class="meta" id="status">尚未開始</div>
+    <canvas id="preview"></canvas>
+  </div>
+
+  <h2>辨識紀錄</h2>
+  <ul id="history"></ul>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script>
+  const video = document.getElementById('video');
+  const startBtn = document.getElementById('startBtn');
+  const scanBtn = document.getElementById('scanBtn');
+  const fileInput = document.getElementById('fileInput');
+  const plateEl = document.getElementById('plate');
+  const statusEl = document.getElementById('status');
+  const preview = document.getElementById('preview');
+  const historyEl = document.getElementById('history');
+
+  // 對準框的位置，需和 .guide 的 CSS 一致（以畫面比例表示）
+  const GUIDE = { left: 0.1, width: 0.8, aspect: 2.4 };
+
+  let worker = null;
+
+  async function getWorker() {
+    if (worker) return worker;
+    statusEl.textContent = '載入辨識模型中（第一次需要下載，約數 MB）…';
+    worker = await Tesseract.createWorker('eng');
+    await worker.setParameters({
+      tessedit_char_whitelist: 'ABCDEFGHJKLMNPQRSTUVWXYZ0123456789-',
+      tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE,
+    });
+    return worker;
+  }
+
+  startBtn.addEventListener('click', async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      statusEl.textContent = '此瀏覽器無法使用相機（需要 HTTPS），請改用「拍照 / 選照片」。';
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
+      });
+      video.srcObject = stream;
+      await video.play();
+      scanBtn.disabled = false;
+      startBtn.disabled = true;
+      statusEl.textContent = '相機已開啟，對準車牌後按「辨識」';
+      getWorker().then(() => { statusEl.textContent = '模型已就緒，對準車牌後按「辨識」'; });
+    } catch (err) {
+      statusEl.textContent = '無法開啟相機：' + err.message;
+    }
+  });
+
+  scanBtn.addEventListener('click', () => {
+    // 影片用 object-fit: cover 顯示，要換算畫面上的框到原始影像座標
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const box = video.getBoundingClientRect();
+    const scale = Math.max(box.width / vw, box.height / vh);
+    const shownW = box.width / scale, shownH = box.height / scale;
+    const offX = (vw - shownW) / 2, offY = (vh - shownH) / 2;
+    const w = shownW * GUIDE.width;
+    const h = w / GUIDE.aspect;
+    recognize(video, offX + shownW * GUIDE.left, offY + (shownH - h) / 2, w, h);
+  });
+
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    const img = new Image();
+    img.onload = () => {
+      // 照片沒有對準框，取中央較寬的區域
+      const w = img.naturalWidth * 0.9;
+      const h = Math.min(img.naturalHeight * 0.6, w / 1.5);
+      recognize(img, (img.naturalWidth - w) / 2, (img.naturalHeight - h) / 2, w, h)
+        .finally(() => URL.revokeObjectURL(img.src));
+    };
+    img.src = URL.createObjectURL(file);
+    fileInput.value = '';
+  });
+
+  // 裁切、放大、灰階、Otsu 二值化，讓 OCR 比較準
+  function preprocess(source, sx, sy, sw, sh) {
+    const targetW = 800;
+    const targetH = Math.round(targetW * sh / sw);
+    preview.width = targetW;
+    preview.height = targetH;
+    const ctx = preview.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(source, sx, sy, sw, sh, 0, 0, targetW, targetH);
+
+    const data = ctx.getImageData(0, 0, targetW, targetH);
+    const px = data.data;
+    const gray = new Uint8Array(targetW * targetH);
+    const hist = new Array(256).fill(0);
+    for (let i = 0; i < gray.length; i++) {
+      const g = (px[i * 4] * 0.299 + px[i * 4 + 1] * 0.587 + px[i * 4 + 2] * 0.114) | 0;
+      gray[i] = g;
+      hist[g]++;
+    }
+    const threshold = otsu(hist, gray.length);
+    for (let i = 0; i < gray.length; i++) {
+      const v = gray[i] > threshold ? 255 : 0;
+      px[i * 4] = px[i * 4 + 1] = px[i * 4 + 2] = v;
+    }
+    ctx.putImageData(data, 0, 0);
+    preview.style.display = 'block';
+    return preview;
+  }
+
+  function otsu(hist, total) {
+    let sum = 0;
+    for (let i = 0; i < 256; i++) sum += i * hist[i];
+    let sumB = 0, wB = 0, best = 0, threshold = 127;
+    for (let t = 0; t < 256; t++) {
+      wB += hist[t];
+      if (!wB) continue;
+      const wF = total - wB;
+      if (!wF) break;
+      sumB += t * hist[t];
+      const mB = sumB / wB, mF = (sum - sumB) / wF;
+      const between = wB * wF * (mB - mF) ** 2;
+      if (between > best) { best = between; threshold = t; }
+    }
+    return threshold;
+  }
+
+  // 台灣車牌格式：ABC-1234、1234-AB、AB-1234、ABC-123（機車）、123-ABC 等
+  const PLATE_RE = /^[A-Z0-9]{2,4}-[A-Z0-9]{2,4}$/;
+
+  function normalize(text) {
+    let s = text.toUpperCase().replace(/[^A-Z0-9-]/g, '');
+    s = s.replace(/-+/g, '-').replace(/^-|-$/g, '');
+    if (PLATE_RE.test(s)) return s;
+    // 沒讀到 "-" 時，用英文 / 數字交界處補上
+    const m = s.replace(/-/g, '').match(/^([A-Z]{2,3})([0-9]{3,4})$|^([0-9]{3,4})([A-Z]{2,3})$/);
+    if (m) return m[1] ? m[1] + '-' + m[2] : m[3] + '-' + m[4];
+    return null;
+  }
+
+  async function recognize(source, sx, sy, sw, sh) {
+    scanBtn.disabled = true;
+    plateEl.textContent = '…';
+    try {
+      const w = await getWorker();
+      statusEl.textContent = '辨識中…';
+      const canvas = preprocess(source, sx, sy, sw, sh);
+      const { data } = await w.recognize(canvas);
+      const raw = data.text.trim();
+      const plate = normalize(raw);
+      plateEl.textContent = plate || '讀不到車牌';
+      statusEl.textContent = `原始文字：${raw || '（空白）'}　信心度：${Math.round(data.confidence)}%`;
+      if (plate) {
+        const li = document.createElement('li');
+        li.textContent = `${new Date().toLocaleTimeString()}　${plate}`;
+        historyEl.prepend(li);
+      }
+    } catch (err) {
+      plateEl.textContent = '—';
+      statusEl.textContent = '辨識失敗：' + err.message;
+    } finally {
+      scanBtn.disabled = !video.srcObject;
+    }
+  }
+</script>
+</body>
+</html>
