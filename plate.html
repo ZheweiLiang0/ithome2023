@@ -11,7 +11,9 @@
     --muted: #666666;
     --accent: #1f6feb;
     --ok: #1a7f37;
+    --warn: #9a6700;
     --card: #f4f5f7;
+    --line: #d0d7de;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -20,7 +22,9 @@
       --muted: #9a9a9a;
       --accent: #4c8dff;
       --ok: #3fb950;
+      --warn: #d29922;
       --card: #1c1f23;
+      --line: #30363d;
     }
   }
   * { box-sizing: border-box; }
@@ -34,6 +38,30 @@
   main { max-width: 640px; margin: 0 auto; }
   h1 { font-size: 1.4rem; margin: 0 0 8px; }
   p.hint { color: var(--muted); margin: 0 0 16px; font-size: 0.9rem; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+  .tabs button {
+    flex: 1;
+    background: var(--card);
+    color: var(--fg);
+    border: 2px solid transparent;
+  }
+  .tabs button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+  .panel { margin-bottom: 12px; }
+  .panel[hidden] { display: none; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  select, input[type=url] {
+    flex: 1 1 200px;
+    min-width: 0;
+    padding: 12px;
+    font-size: 1rem;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--fg);
+  }
+  details { color: var(--muted); font-size: 0.85rem; }
+  details code { word-break: break-all; }
+  .warn { color: var(--warn); font-size: 0.85rem; margin: 4px 0 8px; }
   .viewer {
     position: relative;
     width: 100%;
@@ -42,12 +70,14 @@
     overflow: hidden;
     aspect-ratio: 3 / 4;
   }
+  .viewer.wide { aspect-ratio: 16 / 9; }
   video, .viewer img {
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
   }
+  video[hidden], .viewer img[hidden] { display: none; }
   /* 對準框：只辨識框內區域 */
   .guide {
     position: absolute;
@@ -61,7 +91,7 @@
     box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.35);
     pointer-events: none;
   }
-  .buttons { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
+  .buttons { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; align-items: center; }
   button, label.btn {
     flex: 1 1 140px;
     padding: 14px;
@@ -75,6 +105,8 @@
   }
   button:disabled { opacity: 0.5; }
   label.btn { background: var(--card); color: var(--fg); }
+  label.toggle { flex: 1 1 140px; display: flex; gap: 8px; align-items: center; justify-content: center; }
+  label.toggle input { width: 20px; height: 20px; }
   input[type=file] { display: none; }
   .result {
     background: var(--card);
@@ -96,16 +128,56 @@
 <body>
 <main>
   <h1>手機車牌辨識</h1>
-  <p class="hint">把車牌對準黃色框，按「辨識」。所有運算都在手機瀏覽器裡完成，影像不會上傳。</p>
+  <p class="hint">選擇影像來源，把車牌對準黃色框後按「辨識」。所有運算都在瀏覽器裡完成，影像不會上傳。</p>
 
-  <div class="viewer">
+  <div class="tabs" role="group" aria-label="影像來源">
+    <button id="tabPhone" aria-pressed="true">手機鏡頭</button>
+    <button id="tabIp" aria-pressed="false">IP 攝影機</button>
+  </div>
+
+  <div class="panel" id="phonePanel">
+    <div class="row">
+      <select id="deviceSelect" aria-label="選擇鏡頭">
+        <option value="">後鏡頭（預設）</option>
+      </select>
+      <button id="startBtn">開啟相機</button>
+    </div>
+  </div>
+
+  <div class="panel" id="ipPanel" hidden>
+    <div class="row">
+      <input id="ipUrl" type="url" inputmode="url" placeholder="http://192.168.1.10:1984/api/stream.mjpeg?src=cam1" aria-label="攝影機影像網址">
+    </div>
+    <div class="row">
+      <select id="ipMode" aria-label="影像類型">
+        <option value="auto">自動判斷</option>
+        <option value="mjpeg">MJPEG 串流</option>
+        <option value="snapshot">JPEG 截圖（定時更新）</option>
+      </select>
+      <button id="ipBtn">連線</button>
+    </div>
+    <div class="warn" id="ipWarn" hidden></div>
+    <details>
+      <summary>攝影機要怎麼設定？</summary>
+      <p>瀏覽器讀不了 RTSP，要讓攝影機（或轉接程式）提供 <b>MJPEG 串流</b> 或 <b>JPEG 截圖</b> 網址，而且要允許跨網域讀取（CORS）。</p>
+      <p>建議用 <b>go2rtc</b> 轉接，設定檔在 repo 的 <code>ipcam/go2rtc.yaml</code>：</p>
+      <ul>
+        <li>MJPEG：<code>http://&lt;go2rtc 的 IP&gt;:1984/api/stream.mjpeg?src=cam1</code></li>
+        <li>截圖：<code>http://&lt;go2rtc 的 IP&gt;:1984/api/frame.jpeg?src=cam1</code></li>
+      </ul>
+      <p>這個網頁若是用 <code>https://</code> 打開（例如 GitHub Pages），瀏覽器會擋掉 <code>http://</code> 的攝影機網址。請改從 go2rtc 打開這個網頁：<code>http://&lt;go2rtc 的 IP&gt;:1984/plate.html</code>。</p>
+    </details>
+  </div>
+
+  <div class="viewer" id="viewer">
     <video id="video" playsinline muted autoplay></video>
+    <img id="ipImg" alt="IP 攝影機畫面" hidden>
     <div class="guide"></div>
   </div>
 
   <div class="buttons">
-    <button id="startBtn">開啟相機</button>
     <button id="scanBtn" disabled>辨識</button>
+    <label class="toggle"><input id="autoScan" type="checkbox" disabled> 連續辨識</label>
     <label class="btn" for="fileInput">改用拍照 / 選照片</label>
     <input id="fileInput" type="file" accept="image/*" capture="environment">
   </div>
@@ -122,19 +194,52 @@
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script>
-  const video = document.getElementById('video');
-  const startBtn = document.getElementById('startBtn');
-  const scanBtn = document.getElementById('scanBtn');
-  const fileInput = document.getElementById('fileInput');
-  const plateEl = document.getElementById('plate');
-  const statusEl = document.getElementById('status');
-  const preview = document.getElementById('preview');
-  const historyEl = document.getElementById('history');
+  const $ = (id) => document.getElementById(id);
+  const video = $('video');
+  const ipImg = $('ipImg');
+  const viewer = $('viewer');
+  const tabPhone = $('tabPhone');
+  const tabIp = $('tabIp');
+  const phonePanel = $('phonePanel');
+  const ipPanel = $('ipPanel');
+  const deviceSelect = $('deviceSelect');
+  const startBtn = $('startBtn');
+  const ipUrl = $('ipUrl');
+  const ipMode = $('ipMode');
+  const ipBtn = $('ipBtn');
+  const ipWarn = $('ipWarn');
+  const scanBtn = $('scanBtn');
+  const autoScan = $('autoScan');
+  const fileInput = $('fileInput');
+  const plateEl = $('plate');
+  const statusEl = $('status');
+  const preview = $('preview');
+  const historyEl = $('history');
 
   // 對準框的位置，需和 .guide 的 CSS 一致（以畫面比例表示）
   const GUIDE = { left: 0.1, width: 0.8, aspect: 2.4 };
+  const AUTO_SCAN_MS = 1500;      // 連續辨識的間隔
+  const SNAPSHOT_MS = 500;        // JPEG 截圖模式的更新間隔
+  const SAME_PLATE_MS = 15000;    // 同一個車牌在這段時間內不重複記錄
 
   let worker = null;
+  let stream = null;
+  let source = null;              // 目前畫面上的影像來源：video 或 ipImg
+  let busy = false;
+  let autoTimer = null;
+  let snapshotTimer = null;
+  let ipSession = 0;              // 每次重新連線就加一，讓舊的截圖迴圈停下來
+  let snapshotFrame = null;       // 截圖模式下最近一張完整載入的畫面
+  let lastPlate = { text: '', time: 0 };
+
+  function store(key, value) {
+    try { localStorage.setItem(key, value); } catch (e) { /* 無痕模式等情況不能存，忽略 */ }
+  }
+  function load(key) {
+    try { return localStorage.getItem(key) || ''; } catch (e) { return ''; }
+  }
+  ipUrl.value = load('plate.ipUrl');
+  ipMode.value = load('plate.ipMode') || 'auto';
 
   async function getWorker() {
     if (worker) return worker;
@@ -147,42 +252,227 @@
     return worker;
   }
 
-  startBtn.addEventListener('click', async () => {
+  // ---- 切換來源 ----
+
+  function setTab(name) {
+    const isPhone = name === 'phone';
+    tabPhone.setAttribute('aria-pressed', isPhone);
+    tabIp.setAttribute('aria-pressed', !isPhone);
+    phonePanel.hidden = !isPhone;
+    ipPanel.hidden = isPhone;
+    stopAll();
+    statusEl.textContent = isPhone ? '按「開啟相機」開始' : '輸入攝影機網址後按「連線」';
+    if (!isPhone) checkMixedContent();
+  }
+  tabPhone.addEventListener('click', () => setTab('phone'));
+  tabIp.addEventListener('click', () => setTab('ip'));
+
+  function stopAll() {
+    setAutoScan(false);
+    if (stream) {
+      stream.getTracks().forEach((t) => t.stop());
+      stream = null;
+    }
+    video.srcObject = null;
+    ipSession++;
+    clearTimeout(snapshotTimer);
+    ipImg.onload = ipImg.onerror = null;
+    ipImg.removeAttribute('src');
+    snapshotFrame = null;
+    source = null;
+    startBtn.disabled = false;
+    updateButtons();
+  }
+
+  function updateButtons() {
+    scanBtn.disabled = !source || busy;
+    autoScan.disabled = !source;
+  }
+
+  function showSource(el) {
+    video.hidden = el !== video;
+    ipImg.hidden = el !== ipImg;
+    // 監視器畫面多半是橫的，手機鏡頭是直的
+    viewer.classList.toggle('wide', el === ipImg);
+  }
+
+  // ---- 手機鏡頭 ----
+
+  async function startCamera() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      statusEl.textContent = '此瀏覽器無法使用相機（需要 HTTPS），請改用「拍照 / 選照片」。';
+      statusEl.textContent = '此瀏覽器無法使用相機（需要 HTTPS 或 localhost），請改用「拍照 / 選照片」或 IP 攝影機。';
       return;
     }
+    stopAll();
+    const deviceId = deviceSelect.value;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: 'environment' } }),
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
         audio: false,
       });
       video.srcObject = stream;
       await video.play();
-      scanBtn.disabled = false;
+      showSource(video);
+      source = video;
       startBtn.disabled = true;
+      updateButtons();
       statusEl.textContent = '相機已開啟，對準車牌後按「辨識」';
-      getWorker().then(() => { statusEl.textContent = '模型已就緒，對準車牌後按「辨識」'; });
+      listDevices();
+      getWorker().then(() => { if (!busy) statusEl.textContent = '模型已就緒，對準車牌後按「辨識」'; });
     } catch (err) {
       statusEl.textContent = '無法開啟相機：' + err.message;
     }
-  });
+  }
 
-  scanBtn.addEventListener('click', () => {
-    // 影片用 object-fit: cover 顯示，要換算畫面上的框到原始影像座標
-    const vw = video.videoWidth, vh = video.videoHeight;
-    const box = video.getBoundingClientRect();
+  // 取得權限後才看得到鏡頭名稱；USB 外接鏡頭（UVC）也會出現在這裡
+  async function listDevices() {
+    const devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+    const current = stream && stream.getVideoTracks()[0].getSettings().deviceId;
+    deviceSelect.innerHTML = '<option value="">後鏡頭（預設）</option>';
+    devices.forEach((d, i) => {
+      const opt = document.createElement('option');
+      opt.value = d.deviceId;
+      opt.textContent = d.label || `鏡頭 ${i + 1}`;
+      deviceSelect.appendChild(opt);
+    });
+    if (current && devices.some((d) => d.deviceId === current)) deviceSelect.value = current;
+  }
+
+  startBtn.addEventListener('click', startCamera);
+  deviceSelect.addEventListener('change', () => { if (stream) startCamera(); });
+
+  // ---- IP 攝影機 ----
+
+  function checkMixedContent() {
+    const blocked = location.protocol === 'https:' && /^http:/i.test(ipUrl.value.trim());
+    ipWarn.hidden = !blocked;
+    ipWarn.textContent = blocked
+      ? '這個網頁是用 https:// 開的，瀏覽器會擋掉 http:// 的攝影機網址。請從 go2rtc 打開這個網頁（見下方說明）。'
+      : '';
+    return blocked;
+  }
+  ipUrl.addEventListener('input', checkMixedContent);
+
+  function withCacheBust(url) {
+    return url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+  }
+
+  function connectIp() {
+    const url = ipUrl.value.trim();
+    if (!url) {
+      statusEl.textContent = '請先輸入攝影機網址';
+      return;
+    }
+    stopAll();
+    store('plate.ipUrl', url);
+    store('plate.ipMode', ipMode.value);
+    checkMixedContent();
+
+    let mode = ipMode.value;
+    if (mode === 'auto') mode = /mjpe?g|stream|video|\.cgi/i.test(url) && !/frame|snapshot|\.jpe?g(\?|$)/i.test(url) ? 'mjpeg' : 'snapshot';
+
+    const session = ++ipSession;
+    statusEl.textContent = '連線中…';
+    showSource(ipImg);
+    // 要先設 crossOrigin 再設 src，畫面才能拿來辨識；攝影機必須回傳 CORS 標頭
+    ipImg.crossOrigin = 'anonymous';
+
+    let connected = false;
+    const onConnected = () => {
+      if (connected) return;
+      connected = true;
+      source = ipImg;
+      updateButtons();
+      statusEl.textContent = `已連線（${mode === 'mjpeg' ? 'MJPEG 串流' : 'JPEG 截圖'}），對準車牌後按「辨識」或勾選「連續辨識」`;
+      getWorker();
+    };
+    const onFailed = () => {
+      source = null;
+      setAutoScan(false);
+      updateButtons();
+      statusEl.textContent = '連不到攝影機。請確認：①網址正確，手機和攝影機在同一個網路；'
+        + '②不是用 https 網頁讀 http 網址；③攝影機或 go2rtc 有允許跨網域（CORS，go2rtc 設 origin: "*"）。';
+    };
+
+    if (mode === 'mjpeg') {
+      ipImg.onload = () => { if (session === ipSession) onConnected(); };
+      ipImg.onerror = () => { if (session === ipSession) onFailed(); };
+      ipImg.src = url;
+      return;
+    }
+
+    // 截圖模式：先在背景載完一張，再換到畫面上，辨識時才不會拿到載到一半的圖
+    ipImg.onload = ipImg.onerror = null;
+    const next = () => {
+      const loader = new Image();
+      loader.crossOrigin = 'anonymous';
+      loader.onload = () => {
+        if (session !== ipSession) return;
+        snapshotFrame = loader;
+        ipImg.src = loader.src;
+        onConnected();
+        snapshotTimer = setTimeout(next, SNAPSHOT_MS);
+      };
+      loader.onerror = () => {
+        if (session !== ipSession) return;
+        // 已經連上後偶爾掉一張就重試，一開始就失敗才當成連不到
+        if (connected) snapshotTimer = setTimeout(next, SNAPSHOT_MS * 2);
+        else onFailed();
+      };
+      loader.src = withCacheBust(url);
+    };
+    next();
+  }
+  ipBtn.addEventListener('click', connectIp);
+
+  // ---- 辨識 ----
+
+  function frameSize(el) {
+    return el === video
+      ? { w: video.videoWidth, h: video.videoHeight }
+      : { w: el.naturalWidth, h: el.naturalHeight };
+  }
+
+  // 畫面用 object-fit: cover 顯示，要換算畫面上的框到原始影像座標
+  function guideRect(el) {
+    const { w: vw, h: vh } = frameSize(el);
+    const box = el.getBoundingClientRect();
     const scale = Math.max(box.width / vw, box.height / vh);
     const shownW = box.width / scale, shownH = box.height / scale;
     const offX = (vw - shownW) / 2, offY = (vh - shownH) / 2;
     const w = shownW * GUIDE.width;
     const h = w / GUIDE.aspect;
-    recognize(video, offX + shownW * GUIDE.left, offY + (shownH - h) / 2, w, h);
+    return [offX + shownW * GUIDE.left, offY + (shownH - h) / 2, w, h];
+  }
+
+  function scanCurrent() {
+    if (!source || busy) return;
+    const { w, h } = frameSize(source);
+    if (!w || !h) return;
+    // 框的位置用畫面上的元素算；截圖模式的畫素則取最近一張完整的圖（尺寸相同）
+    const pixels = source === ipImg && snapshotFrame ? snapshotFrame : source;
+    recognize(pixels, ...guideRect(source));
+  }
+  scanBtn.addEventListener('click', scanCurrent);
+
+  function setAutoScan(on) {
+    autoScan.checked = on;
+    clearInterval(autoTimer);
+    autoTimer = on ? setInterval(scanCurrent, AUTO_SCAN_MS) : null;
+  }
+  autoScan.addEventListener('change', () => {
+    setAutoScan(autoScan.checked);
+    if (autoScan.checked) scanCurrent();
   });
 
   fileInput.addEventListener('change', () => {
     const file = fileInput.files[0];
     if (!file) return;
+    setAutoScan(false);
     const img = new Image();
     img.onload = () => {
       // 照片沒有對準框，取中央較寬的區域
@@ -196,13 +486,13 @@
   });
 
   // 裁切、放大、灰階、Otsu 二值化，讓 OCR 比較準
-  function preprocess(source, sx, sy, sw, sh) {
+  function preprocess(src, sx, sy, sw, sh) {
     const targetW = 800;
     const targetH = Math.round(targetW * sh / sw);
     preview.width = targetW;
     preview.height = targetH;
     const ctx = preview.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(source, sx, sy, sw, sh, 0, 0, targetW, targetH);
+    ctx.drawImage(src, sx, sy, sw, sh, 0, 0, targetW, targetH);
 
     const data = ctx.getImageData(0, 0, targetW, targetH);
     const px = data.data;
@@ -253,28 +543,45 @@
     return null;
   }
 
-  async function recognize(source, sx, sy, sw, sh) {
-    scanBtn.disabled = true;
-    plateEl.textContent = '…';
+  function addHistory(plate) {
+    const now = Date.now();
+    if (plate === lastPlate.text && now - lastPlate.time < SAME_PLATE_MS) {
+      lastPlate.time = now;
+      return;
+    }
+    lastPlate = { text: plate, time: now };
+    const li = document.createElement('li');
+    li.textContent = `${new Date().toLocaleTimeString()}　${plate}`;
+    historyEl.prepend(li);
+  }
+
+  async function recognize(src, sx, sy, sw, sh) {
+    busy = true;
+    updateButtons();
+    const continuous = autoScan.checked;
+    if (!continuous) plateEl.textContent = '…';
     try {
       const w = await getWorker();
-      statusEl.textContent = '辨識中…';
-      const canvas = preprocess(source, sx, sy, sw, sh);
+      if (!continuous) statusEl.textContent = '辨識中…';
+      const canvas = preprocess(src, sx, sy, sw, sh);
       const { data } = await w.recognize(canvas);
       const raw = data.text.trim();
       const plate = normalize(raw);
-      plateEl.textContent = plate || '讀不到車牌';
-      statusEl.textContent = `原始文字：${raw || '（空白）'}　信心度：${Math.round(data.confidence)}%`;
-      if (plate) {
-        const li = document.createElement('li');
-        li.textContent = `${new Date().toLocaleTimeString()}　${plate}`;
-        historyEl.prepend(li);
-      }
+      // 連續辨識時，沒讀到就保留上一個結果，畫面才不會一直閃
+      if (plate || !continuous) plateEl.textContent = plate || '讀不到車牌';
+      statusEl.textContent = `${continuous ? '連續辨識中　' : ''}原始文字：${raw || '（空白）'}　信心度：${Math.round(data.confidence)}%`;
+      if (plate) addHistory(plate);
     } catch (err) {
-      plateEl.textContent = '—';
-      statusEl.textContent = '辨識失敗：' + err.message;
+      if (err.name === 'SecurityError') {
+        setAutoScan(false);
+        statusEl.textContent = '瀏覽器不允許讀取攝影機畫面：攝影機沒有開放跨網域（CORS）。請用 go2rtc 轉接並設定 origin: "*"。';
+      } else {
+        statusEl.textContent = '辨識失敗：' + err.message;
+      }
+      if (!continuous) plateEl.textContent = '—';
     } finally {
-      scanBtn.disabled = !video.srcObject;
+      busy = false;
+      updateButtons();
     }
   }
 </script>

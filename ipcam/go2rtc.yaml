@@ -1,0 +1,13 @@
+# go2rtc 設定：把 IP 攝影機的 RTSP 轉成瀏覽器讀得到的 MJPEG / JPEG
+# 說明見同資料夾的 README.md
+
+streams:
+  # 把帳號、密碼、IP 換成你的攝影機；用子碼流（解析度較低）比較省電也夠辨識
+  # 海康：rtsp://帳號:密碼@192.168.1.64:554/Streaming/Channels/102
+  # 大華：rtsp://帳號:密碼@192.168.1.108:554/cam/realmonitor?channel=1&subtype=1
+  cam1: rtsp://admin:password@192.168.1.64:554/Streaming/Channels/102
+
+api:
+  listen: ":1984"
+  origin: "*"        # 允許網頁讀取畫面（CORS），沒有這行就不能辨識
+  static_dir: "www"  # 把 plate.html 放進 www/，手機開 http://<這台的 IP>:1984/plate.html
